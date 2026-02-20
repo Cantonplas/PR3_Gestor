@@ -4,6 +4,7 @@
 void setup() {
   Serial.begin(115200);
   Board::start();
+  Comms::init();
   Scheduler::start();
   xTaskCreate(
     Comms::update,         

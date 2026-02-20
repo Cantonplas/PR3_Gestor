@@ -8,12 +8,8 @@
 extern void ErrorHandler(String s);
 
 /* ---------- WIFI ---------- */
-static constexpr char* WIFI_SSID = "RAFAGUAPO";
-static constexpr char* WIFI_PASS = "12345678";
-
-/* ---------- MQTT ---------- */
-static constexpr char* BROKER_IP = "192.168.4.1";
-static constexpr int BROKER_PORT = 1883;
+static constexpr char* AP_SSID = "RAFAGUAPO";
+static constexpr char* AP_PASS = "12345678";
 
 class Comms
 {
@@ -36,9 +32,7 @@ class Comms
     inline static std::array<Request_type,2> robot_requests{Request_type::None,Request_type::None};
     inline static std::array<uint32_t,2> best_robot_time{0,0};
 
-  using Robot_id;
-
-  inline static PicoMQTT::Server mqtt{BROKER_IP, BROKER_PORT, "Gestor"};
+  inline static PicoMQTT::Server mqtt;
   inline static portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;
 
   inline static String auth_topic_1 = String("gestor/1/autorizacion");
@@ -50,8 +44,8 @@ class Comms
   
   static void init()
   {
-    WiFi.mode(WIFI_STA);
-    WiFi.begin(WIFI_SSID, WIFI_PASS);
+    WiFi.mode(WIFI_AP);
+    WiFi.softAP(AP_SSID, AP_PASS);
     
     String topic_solicitud = String("vehiculo/+/solicitud");
     String topic_salida = String("vehiculo/+/salida");
@@ -66,7 +60,7 @@ class Comms
           return;
       }
 
-      Robot_id robot = static_cast<Robot_id>(dic["id_device"]);
+      Robot_id robot = static_cast<Robot_id>(dic["id_device"].as<uint8_t>());
       portENTER_CRITICAL(&timerMux);
       set_requested(robot);
       portEXIT_CRITICAL(&timerMux);
@@ -82,7 +76,7 @@ class Comms
           return;
       }
 
-      Robot_id robot = static_cast<Robot_id>(dic["id_device"]);
+      Robot_id robot = static_cast<Robot_id>(dic["id_device"].as<uint8_t>());
       uint32_t time_in_ms = dic["time"];
       portENTER_CRITICAL(&timerMux);
       compare_time(robot,time_in_ms);
@@ -92,36 +86,38 @@ class Comms
   }
 
   static bool is_connected(){
-    return WiFi.status() == WL_CONNECTED && mqtt.connected();
+    return WiFi.status() == WL_CONNECTED;
   }
   
   static void update(void* parameters)
   {
+    while(1){
     mqtt.loop();
     delay(50);
+    }
   }
 
 
   static const Request_type& get_state(Robot_id robot)
   {
-    return robot_requests[robot];
+    return robot_requests[static_cast<size_t>(robot)];
   }
 
   static void set_done(Robot_id robot)
   {
-      robot_requests[robot] = Request_type::None;
+      robot_requests[static_cast<size_t>(robot)] = Request_type::None;
       send_finish_robot(robot);
 
   }
 
   static void set_accepted(Robot_id robot)
   {
-      robot_requests[robot] = Request_type::Accepted;
+      robot_requests[static_cast<size_t>(robot)] = Request_type::Accepted;
       send_auth_robot(robot);
 
   }
 
-  static const auto& get_times()const
+  static auto& get_times()
   {
     return best_robot_time;
   }
@@ -130,14 +126,14 @@ private:
 
   static void set_requested(Robot_id robot)
   {
-    robot_requests[robot] = Request_type::Requested;
+    robot_requests[static_cast<size_t>(robot)] = Request_type::Requested;
   }
 
   static void compare_time(Robot_id robot, const uint32_t time)
   {
-    if(time < best_robot_time[robot])
+    if(time < best_robot_time[static_cast<size_t>(robot)])
     {
-      best_robot_time[robot] = time;
+      best_robot_time[static_cast<size_t>(robot)] = time;
       return;
     }
   }
@@ -151,7 +147,7 @@ private:
     char payload[128];
     serializeJson(jsonBuffer, payload);
     
-    if(robot == Robot1)
+    if(robot == Robot_id::Robot1)
     {
     mqtt.publish(auth_topic_1, payload);
     }
@@ -170,7 +166,7 @@ private:
     char payload[128];
     serializeJson(jsonBuffer, payload);
     
-    if(robot == Robot1)
+    if(robot == Robot_id::Robot1)
     {
     mqtt.publish(end_topic_1, payload);
     }
