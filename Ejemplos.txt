@@ -1,0 +1,81 @@
+State machine y scheduler:
+const int PIN_LED = LED_BUILTIN; ç
+int idTareaParpadeo;
+
+void parpadearLed() {
+    // Lee el estado actual y lo invierte
+    digitalWrite(PIN_LED, !digitalRead(PIN_LED));
+}
+
+static bool transicion1 = false;
+static bool transicion2 = false;
+
+constexpr auto state = make_state(States::STATE1,
+        Transition<States>{States::STATE2, []() { return transicion1; }}
+    );
+
+constexpr auto state2 = make_state(States::STATE2,
+        Transition<States>{States::STATE1, []() { return transicion2; }}
+    );
+
+static constinit auto state_machine = [state,state2]()consteval{
+    auto sm = make_state_machine(States::STATE1, state,state2);
+    sm.add_enter_action([](){
+      transicion1 = false;
+      Serial.println("Entro al estado 1");
+    },state);
+
+    sm.add_enter_action([](){
+      transicion2 = false;
+      Serial.println("Entro al estado 2");
+    },state2);
+
+    using namespace std::chrono_literals;
+    
+     sm.add_cyclic_action([](){
+        parpadearLed();
+        Serial.println("parpadeando led cada 100ms en estado 1");
+      }, 100ms, state);
+
+      sm.add_cyclic_action([](){
+        parpadearLed();
+        Serial.println("parpadeando led cada 500ms en estado 2");
+      }, 500ms, state2);
+
+      sm.add_exit_action([](){
+            Serial.println("Saliendo de estado 2");
+        }, state2);
+
+        sm.add_exit_action([](){
+            Serial.println("Saliendo de estado 1");
+        }, state);
+
+    return sm;
+
+}();
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(PIN_LED, OUTPUT);
+
+  idTareaParpadeo = Scheduler::register_task(5000,[](){
+    transicion1 = true;
+  });
+
+  Scheduler::set_timeout(10000,[](){
+      transicion2=true;
+  });
+
+   Scheduler::register_task(50, [](){
+        state_machine.check_transitions();
+    });
+
+  Scheduler::start();
+
+  state_machine.start();
+
+}
+
+void loop() {
+  Scheduler::update();
+}
