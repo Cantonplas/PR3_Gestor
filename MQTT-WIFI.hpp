@@ -34,18 +34,19 @@ class Comms
 
   inline static PicoMQTT::Server mqtt;
   inline static portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;
+  inline static bool Wifi_error{false};
 
-  inline static String auth_topic_1 = String("gestor/1/autorizacion");
-  inline static String auth_topic_2 = String("gestor/2/autorizacion");
-  inline static String end_topic_1 = String("gestor/1/finalizado");
-  inline static String end_topic_2 = String("gestor/2/finalizado");
+  inline static String auth_topic_1 = String("gestor/0/autorizacion");
+  inline static String auth_topic_2 = String("gestor/1/autorizacion");
+  inline static String end_topic_1 = String("gestor/0/finalizado");
+  inline static String end_topic_2 = String("gestor/1/finalizado");
 
   public:
   
   static void init()
   {
     WiFi.mode(WIFI_AP);
-    WiFi.softAP(AP_SSID, AP_PASS);
+    Wifi_error = WiFi.softAP(AP_SSID, AP_PASS);
     
     String topic_solicitud = String("vehiculo/+/solicitud");
     String topic_salida = String("vehiculo/+/salida");
@@ -86,7 +87,7 @@ class Comms
   }
 
   static bool is_connected(){
-    return WiFi.status() == WL_CONNECTED;
+    return Wifi_error;
   }
   
   static void update(void* parameters)

@@ -7,14 +7,38 @@
 
 class Board
 {
-  inline static bool busy_junction_flag{false};
-
   static void control_loop()
   {
+    static bool busy_junction_flag{false};
     if(busy_junction_flag == true)
     {
       return;
     }
+
+    static bool priority_robot1 = false;
+      if((Comms::get_state(Comms::Robot_id::Robot1) == Comms::Request_type ::Requested) &&  
+          (Comms::get_state(Comms::Robot_id::Robot2)== Comms::Request_type ::Requested))
+      {
+        if(priority_robot1)
+        {
+          Comms::set_accepted(Comms::Robot_id::Robot1);
+          busy_junction_flag = true;
+          Scheduler::set_timeout(5000,[](){
+            Comms::set_done(Comms::Robot_id::Robot1);
+            busy_junction_flag = false;
+          });
+        }
+        else{
+          Comms::set_accepted(Comms::Robot_id::Robot2);
+          busy_junction_flag= true;
+          Scheduler::set_timeout(5000,[](){
+            Comms::set_done(Comms::Robot_id::Robot2);
+            busy_junction_flag= false;
+          });
+        }
+        priority_robot1 = !priority_robot1;
+        return;
+      }
 
     if(Comms::get_state(Comms::Robot_id::Robot1) == Comms::Request_type ::Requested)
       {
@@ -36,30 +60,6 @@ class Board
           busy_junction_flag= false;
         });
         return;
-      }
-
-      static bool priority_robot1 = false;
-      if((Comms::get_state(Comms::Robot_id::Robot1) == Comms::Request_type ::Requested) &&  
-          (Comms::get_state(Comms::Robot_id::Robot2)== Comms::Request_type ::Requested))
-      {
-        if(priority_robot1)
-        {
-          Comms::set_accepted(Comms::Robot_id::Robot1);
-          busy_junction_flag = true;
-          Scheduler::set_timeout(5000,[](){
-          Comms::set_done(Comms::Robot_id::Robot1);
-          busy_junction_flag = false;
-          });
-        }
-        else{
-          Comms::set_accepted(Comms::Robot_id::Robot2);
-          busy_junction_flag= true;
-          Scheduler::set_timeout(5000,[](){
-          Comms::set_done(Comms::Robot_id::Robot2);
-          busy_junction_flag= false;
-          });
-        }
-        priority_robot1 = !priority_robot1;
       }
   }
 
@@ -114,7 +114,7 @@ class Board
       static bool toggle = true;
       Actuators::set_led_blue(toggle);
       toggle =!toggle;
-    },250ms,junction_ready_state);
+    },250ms,junction_busy_state);
 
     return sm;
   }();

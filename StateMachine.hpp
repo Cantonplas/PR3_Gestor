@@ -152,7 +152,7 @@ public:
 
       timed_action.id = Scheduler::register_task(timed_action.period, timed_action.action);
 
-      if(timed_action.id == 0)
+      if(timed_action.id == 255)
       {
         for(size_t j = 0; j < i; ++j)
         {
