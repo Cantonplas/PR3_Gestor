@@ -23,7 +23,7 @@ class Board
         {
           Comms::set_accepted(Comms::Robot_id::Robot1);
           busy_junction_flag = true;
-          Scheduler::set_timeout(5000,[](){
+          Scheduler::set_timeout(1000,[](){
             Comms::set_done(Comms::Robot_id::Robot1);
             busy_junction_flag = false;
           });
@@ -31,7 +31,7 @@ class Board
         else{
           Comms::set_accepted(Comms::Robot_id::Robot2);
           busy_junction_flag= true;
-          Scheduler::set_timeout(5000,[](){
+          Scheduler::set_timeout(1000,[](){
             Comms::set_done(Comms::Robot_id::Robot2);
             busy_junction_flag= false;
           });
@@ -44,7 +44,7 @@ class Board
       {
         Comms::set_accepted(Comms::Robot_id::Robot1);
         busy_junction_flag = true;
-        Scheduler::set_timeout(5000,[](){
+        Scheduler::set_timeout(1000,[](){
           Comms::set_done(Comms::Robot_id::Robot1);
           busy_junction_flag = false;
         });
@@ -55,7 +55,7 @@ class Board
       {
         Comms::set_accepted(Comms::Robot_id::Robot2);
         busy_junction_flag = true;
-        Scheduler::set_timeout(5000,[](){
+        Scheduler::set_timeout(1000,[](){
           Comms::set_done(Comms::Robot_id::Robot2);
           busy_junction_flag= false;
         });
@@ -97,11 +97,6 @@ class Board
     sm.add_enter_action([](){
       Actuators::set_led_blue(true);
     },junction_ready_state);
-
-
-    sm.add_cyclic_action([](){
-      Board::control_loop();
-    },10ms,junction_ready_state);
     
 
     /*--------Junction Busy----------*/
@@ -128,6 +123,11 @@ class Board
       Actuators::set_led_green(toggle);
       toggle = !toggle;
     },250ms,connecting_state);
+
+    
+    sm.add_cyclic_action([](){
+      Board::control_loop();
+    },10ms,operational_state);
 
     sm.add_enter_action([](){
       Actuators::set_led_red(true);
