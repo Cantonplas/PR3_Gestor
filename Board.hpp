@@ -4,12 +4,29 @@
 #include "Data.hpp"
 #include "Actuators.hpp"
 #include "MQTT-WIFI.hpp"
+#include "Sensors.hpp"
+
+#define wait_time 5000
 
 class Board
 {
   static void control_loop()
   {
     static bool busy_junction_flag{false};
+    if(Sensors::distancia_ultra1 < 20.0f || Sensors::distancia_ultra2 < 20.0f)
+    {
+      if(Comms::get_state(Comms::Robot_id::Robot1) == Comms::Request_type ::Accepted)
+      {
+        Comms::set_done(Comms::Robot_id::Robot1);
+        busy_junction_flag = false;
+      }
+      if(Comms::get_state(Comms::Robot_id::Robot2) == Comms::Request_type ::Accepted)
+      {
+        Comms::set_done(Comms::Robot_id::Robot2);
+        busy_junction_flag = false;
+      }
+
+    }
     if(busy_junction_flag == true)
     {
       return;
@@ -23,18 +40,10 @@ class Board
         {
           Comms::set_accepted(Comms::Robot_id::Robot1);
           busy_junction_flag = true;
-          Scheduler::set_timeout(1000,[](){
-            Comms::set_done(Comms::Robot_id::Robot1);
-            busy_junction_flag = false;
-          });
         }
         else{
           Comms::set_accepted(Comms::Robot_id::Robot2);
           busy_junction_flag= true;
-          Scheduler::set_timeout(1000,[](){
-            Comms::set_done(Comms::Robot_id::Robot2);
-            busy_junction_flag= false;
-          });
         }
         priority_robot1 = !priority_robot1;
         return;
@@ -44,10 +53,6 @@ class Board
       {
         Comms::set_accepted(Comms::Robot_id::Robot1);
         busy_junction_flag = true;
-        Scheduler::set_timeout(1000,[](){
-          Comms::set_done(Comms::Robot_id::Robot1);
-          busy_junction_flag = false;
-        });
         return;
       }
 
@@ -55,10 +60,6 @@ class Board
       {
         Comms::set_accepted(Comms::Robot_id::Robot2);
         busy_junction_flag = true;
-        Scheduler::set_timeout(1000,[](){
-          Comms::set_done(Comms::Robot_id::Robot2);
-          busy_junction_flag= false;
-        });
         return;
       }
   }
@@ -145,6 +146,10 @@ class Board
 
     Scheduler::register_task(10,[](){
       State_machine.check_transitions();
+    });
+
+    Scheduler::register_task(50,[](){
+      Sensors::read_ultrasonido();
     });
 
   }

@@ -1,6 +1,5 @@
 #pragma once
 
-#define ID_COCHE 1
 
 enum class General_states: uint8_t
 {
@@ -18,6 +17,11 @@ enum class Operational_states: uint8_t
 namespace Pinout
 {
   static constexpr uint8_t PIN_LED = RGB_BUILTIN;
+  //Ultrasonidos:
+  static constexpr uint8_t TRIG_PIN1 =17;
+  static constexpr uint8_t ECHO_PIN1 =18;
+  static constexpr uint8_t TRIG_PIN2 =15;
+  static constexpr uint8_t ECHO_PIN2 =16;
 };
 
 
