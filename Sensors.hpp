@@ -47,19 +47,24 @@ class Sensors
 
 
     static void read_ultrasonido()
-    {
+{
+    static bool leer_sensor1 = true;
+
+    if(leer_sensor1) {
         digitalWrite(Pinout::TRIG_PIN1, LOW);
         delayMicroseconds(2);
         digitalWrite(Pinout::TRIG_PIN1, HIGH);
         delayMicroseconds(10);
         digitalWrite(Pinout::TRIG_PIN1, LOW);
-
+    } else {
         digitalWrite(Pinout::TRIG_PIN2, LOW);
         delayMicroseconds(2);
         digitalWrite(Pinout::TRIG_PIN2, HIGH);
         delayMicroseconds(10);
         digitalWrite(Pinout::TRIG_PIN2, LOW);
-        
     }
+    
+    leer_sensor1 = !leer_sensor1;
+}
 
 };

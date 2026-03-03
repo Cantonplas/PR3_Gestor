@@ -6,27 +6,12 @@
 #include "MQTT-WIFI.hpp"
 #include "Sensors.hpp"
 
-#define wait_time 5000
 
 class Board
 {
+  inline static bool busy_junction_flag{false};
   static void control_loop()
   {
-    static bool busy_junction_flag{false};
-    if(Sensors::distancia_ultra1 < 20.0f || Sensors::distancia_ultra2 < 20.0f)
-    {
-      if(Comms::get_state(Comms::Robot_id::Robot1) == Comms::Request_type ::Accepted)
-      {
-        Comms::set_done(Comms::Robot_id::Robot1);
-        busy_junction_flag = false;
-      }
-      if(Comms::get_state(Comms::Robot_id::Robot2) == Comms::Request_type ::Accepted)
-      {
-        Comms::set_done(Comms::Robot_id::Robot2);
-        busy_junction_flag = false;
-      }
-
-    }
     if(busy_junction_flag == true)
     {
       return;
@@ -97,6 +82,8 @@ class Board
 
     sm.add_enter_action([](){
       Actuators::set_led_blue(true);
+      Sensors::distancia_ultra1 = 0.0f;
+      Sensors::distancia_ultra2 = 0.0f;
     },junction_ready_state);
     
 
@@ -107,10 +94,48 @@ class Board
     // },junction_busy_state);
 
     sm.add_cyclic_action([](){
+      Sensors::read_ultrasonido();
+    },50ms,junction_busy_state);
+
+    sm.add_cyclic_action([](){
+    if((Sensors::distancia_ultra1 > 1.0f && Sensors::distancia_ultra1 < 20.0f) || 
+    (Sensors::distancia_ultra2 > 1.0f && Sensors::distancia_ultra2 < 20.0f))
+    {
+      if(Comms::get_state(Comms::Robot_id::Robot1) == Comms::Request_type ::Accepted)
+      {
+        Comms::set_done(Comms::Robot_id::Robot1);
+        busy_junction_flag = false;
+      }
+      if(Comms::get_state(Comms::Robot_id::Robot2) == Comms::Request_type ::Accepted)
+      {
+        Comms::set_done(Comms::Robot_id::Robot2);
+        busy_junction_flag = false;
+      }
+    }
+    },20ms,junction_busy_state);
+
+    sm.add_cyclic_action([](){
       static bool toggle = true;
       Actuators::set_led_blue(toggle);
       toggle =!toggle;
     },250ms,junction_busy_state);
+
+    sm.add_exit_action([](){
+      auto last_times = Comms::get_last_times();
+      auto best_times = Comms::get_best_times();
+      for(auto tiempos : last_times)
+      {
+        Serial.print("Last times recieved:");
+        Serial.println(tiempos);
+      }
+
+      for(auto tiempos : best_times)
+      {
+        Serial.print("Best times recieved:");
+        Serial.println(tiempos);
+      }
+
+    },junction_busy_state);
 
     return sm;
   }();
@@ -146,10 +171,6 @@ class Board
 
     Scheduler::register_task(10,[](){
       State_machine.check_transitions();
-    });
-
-    Scheduler::register_task(50,[](){
-      Sensors::read_ultrasonido();
     });
 
   }

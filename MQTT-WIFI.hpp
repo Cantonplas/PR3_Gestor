@@ -29,17 +29,19 @@ class Comms
   };
 
   private: 
-    inline static std::array<Request_type,2> robot_requests{Request_type::None,Request_type::None};
-    inline static std::array<uint32_t,2> best_robot_time{0,0};
+
+  inline static std::array<Request_type,2> robot_requests{Request_type::None,Request_type::None};
+  inline static std::array<uint32_t,2> best_robot_time{0,0};
+  inline static std::array<uint32_t,2> last_robot_time{0,0};
 
   inline static PicoMQTT::Server mqtt;
   inline static portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;
   inline static bool Wifi_error{false};
 
-  inline static String auth_topic_1 = String("gestor/0/autorizacion");
-  inline static String auth_topic_2 = String("gestor/1/autorizacion");
-  inline static String end_topic_1 = String("gestor/0/finalizado");
-  inline static String end_topic_2 = String("gestor/1/finalizado");
+  inline static const String auth_topic_1 = String("gestor/0/autorizacion");
+  inline static const String auth_topic_2 = String("gestor/1/autorizacion");
+  inline static const String end_topic_1 = String("gestor/0/finalizado");
+  inline static const String end_topic_2 = String("gestor/1/finalizado");
 
   public:
   
@@ -118,9 +120,14 @@ class Comms
 
   }
 
-  static auto& get_times()
+  static std::span<const uint32_t> get_best_times()
   {
     return best_robot_time;
+  }
+
+  static std::span<const uint32_t> get_last_times()
+  {
+    return last_robot_time;
   }
 
 private:
@@ -158,7 +165,7 @@ private:
     }
   }
 
-  static void send_finish_robot(Robot_id robot) //Hasta que haya sensores con un timeout
+  static void send_finish_robot(Robot_id robot) 
   {
     static JsonDocument jsonBuffer; 
     jsonBuffer["id_device"] = static_cast<uint8_t>(robot); 
