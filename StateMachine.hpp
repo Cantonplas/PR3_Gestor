@@ -9,47 +9,43 @@
 #include <cstddef>
 #include <type_traits>
 #include <utility>
-#include <unordered_map>
 #include <algorithm>
-#include <chrono> 
-#include "Scheduler.hpp"
+#include <tuple>
+#include <chrono>
 #include "DataStructs.hpp"
+#include "Scheduler.hpp"
 
 extern void ErrorHandler(String s);
 
-
 using ms = std::chrono::milliseconds;
 
-template <typename T, size_t Capacity>
-using FixedVector = StaticVector<T, Capacity>;
-
-template<class StateEnum>
+template <class StateEnum>
 concept IsEnum = std::is_enum_v<StateEnum>;
 
-template<class T>
-concept ValidTime = std::same_as<T, std::chrono::milliseconds>;
+template <class T>
+concept ValidTime =
+    std::same_as<T, std::chrono::milliseconds>;
 
 using Callback = void (*)();
 using Guard = bool (*)();
 
-static constexpr size_t NUMBER_OF_ACTIONS = 20;
+static constexpr size_t NUMBER_OF_ACTIONS = 16;
 
+enum AlarmType { Milliseconds = 0 };
 
-class TimedAction 
-{
+class TimedAction {
 public:
-  Callback action = nullptr;
-  uint32_t period = 0;
-  uint8_t id = 255;
-  bool is_on = false;
+    Callback action = nullptr;
+    uint32_t period = 0;
+    AlarmType alarm_precision = Milliseconds;
+    uint8_t id = 255;
+    bool is_on = false;
 
-  TimedAction() = default;
-  constexpr bool operator==(const TimedAction&) const = default;
+    TimedAction() = default;
+    constexpr bool operator==(const TimedAction&) const = default;
 };
 
-template <IsEnum StateEnum>
-struct Transition 
-{
+template <IsEnum StateEnum> struct Transition {
     StateEnum target;
     Guard predicate;
     constexpr bool operator==(const Transition&) const = default;
@@ -58,165 +54,165 @@ struct Transition
 template <class StateEnum, typename... T>
 concept are_transitions = (std::same_as<T, Transition<StateEnum>> && ...);
 
-template <IsEnum StateEnum, size_t NTransitions,size_t Number_of_state_orders=0>
-class State 
-{ 
+template <IsEnum StateEnum, size_t NTransitions, size_t Number_of_state_orders = 0> class State {
 private:
-  FixedVector<TimedAction,NUMBER_OF_ACTIONS> cyclic_actions = {};
-  FixedVector<Callback,NUMBER_OF_ACTIONS> on_enter_actions = {};
-  FixedVector<Callback,NUMBER_OF_ACTIONS> on_exit_actions = {};
-  StateEnum state = {};
-  FixedVector<Transition<StateEnum>, NTransitions> transitions = {};
+    StaticVector<TimedAction, NUMBER_OF_ACTIONS> cyclic_actions = {};
+    StaticVector<Callback, NUMBER_OF_ACTIONS> on_enter_actions = {};
+    StaticVector<Callback, NUMBER_OF_ACTIONS> on_exit_actions = {};
+    StateEnum state = {};
+    StaticVector<Transition<StateEnum>, NTransitions> transitions = {};
 
 public:
-  static constexpr size_t transition_count = NTransitions;
-  template <typename... T>
+    [[no_unique_address]] StaticVector<uint16_t, Number_of_state_orders> state_orders_ids = {};
+    static constexpr size_t transition_count = NTransitions;
+
+    template <typename... T>
         requires are_transitions<StateEnum, T...>
-    consteval State(StateEnum state, T... transitions)
-        : state(state) 
-        {
-            (this->transitions.push_back(transitions), ...);
+    consteval State(StateEnum state, T... transitions) : state(state) {
+        if (((transitions.target == state) || ...)) {
+            ErrorHandler("Current state cannot be the target of a transition");
+        }
+        (this->transitions.push_back(transitions), ...);
+    }
+
+    consteval State() = default;
+
+    template <size_t N, size_t O> consteval State(const State<StateEnum, N, O>& other) {
+        state = other.get_state();
+        for (const auto& t : other.get_transitions())
+            transitions.push_back(t);
+        for (const auto& a : other.get_cyclic_actions())
+            cyclic_actions.push_back(a);
+        for (const auto& a : other.get_enter_actions())
+            on_enter_actions.push_back(a);
+        for (const auto& a : other.get_exit_actions())
+            on_exit_actions.push_back(a);
+#ifdef STLIB_ETH
+        for (const auto& id : other.state_orders_ids)
+            state_orders_ids.push_back(id);
+#endif
+    }
+
+    constexpr bool operator==(const State&) const = default;
+
+    constexpr const StateEnum& get_state() const { return state; };
+    constexpr const auto& get_transitions() const { return transitions; };
+    constexpr const auto& get_cyclic_actions() const { return cyclic_actions; };
+    constexpr const auto& get_enter_actions() const { return on_enter_actions; };
+    constexpr const auto& get_exit_actions() const { return on_exit_actions; };
+
+    consteval void add_enter_action(Callback action) { on_enter_actions.push_back(action); }
+
+    consteval void add_exit_action(Callback action) { on_exit_actions.push_back(action); }
+
+    void enter() {
+        for (const auto& action : on_enter_actions) {
+            if (action)
+                action();
+        }
+        register_all_timed_actions();
+    }
+
+    void exit() {
+        unregister_all_timed_actions();
+        for (const auto& action : on_exit_actions) {
+            if (action)
+                action();
+        }
+    }
+
+    void unregister_all_timed_actions() {
+        for (size_t i = 0; i < cyclic_actions.size(); i++) {
+            TimedAction& timed_action = cyclic_actions[i];
+            if (timed_action.action == nullptr) {
+                continue;
+            }
+            if (!timed_action.is_on) {
+                continue;
+            }
+
+            Scheduler::unregister_task(timed_action.id);
+            timed_action.is_on = false;
+        }
+    }
+
+    void register_all_timed_actions() {
+        for (size_t i = 0; i < cyclic_actions.size(); i++) {
+            TimedAction& timed_action = cyclic_actions[i];
+            if (timed_action.action == nullptr) {
+                continue;
+            }
+
+            switch (timed_action.alarm_precision) {
+            case Milliseconds:
+                timed_action.id =
+                    Scheduler::register_task(timed_action.period , timed_action.action);
+                break;
+
+            default:
+                ErrorHandler("Invalid Alarm Precision");
+                return;
+                break;
+            }
+            if (timed_action.id == Scheduler::INVALID_ID) {
+                for (size_t j = 0; j < i; ++j) {
+                    TimedAction& prev_action = cyclic_actions[j];
+                    if (prev_action.action == nullptr) {
+                        continue;
+                    }
+                    if (!prev_action.is_on) {
+                        continue;
+                    }
+                    Scheduler::unregister_task(prev_action.id);
+                    prev_action.is_on = false;
+                }
+                ErrorHandler("Failed to register timed action");
+                return;
+            }
+            timed_action.is_on = true;
+        }
+    }
+
+    void remove_cyclic_action(TimedAction* timed_action) {
+        if (timed_action->is_on) {
+            unregister_timed_action(timed_action);
         }
 
-  consteval State() = default;
-
-  template <size_t N, size_t O>
-  consteval State(const State<StateEnum, N, O>& other){
-      state = other.get_state();
-      for(const auto& t : other.get_transitions()) transitions.push_back(t);
-      for(const auto& a : other.get_cyclic_actions()) cyclic_actions.push_back(a);
-      for(const auto& a : other.get_enter_actions()) on_enter_actions.push_back(a);
-      for(const auto& a : other.get_exit_actions()) on_exit_actions.push_back(a);
-  }
-  constexpr bool operator==(const State&) const = default;
-    
-  
-
-  constexpr const StateEnum& get_state() const { return state; };
-  constexpr const auto& get_transitions() const { return transitions; };
-  constexpr const auto& get_cyclic_actions() const {return cyclic_actions;};
-  constexpr const auto& get_enter_actions() const {return on_enter_actions;};
-  constexpr const auto& get_exit_actions() const {return on_exit_actions;};
-
-  consteval void add_enter_action(Callback action)
-  {
-    on_enter_actions.push_back(action);
-  }
-
-  consteval void add_exit_action(Callback action)
-  {
-    on_exit_actions.push_back(action);
-  }
-
-  void enter()
-  {
-    for (const auto& action : on_enter_actions) 
-      {
-          if(action) action();
-      }
-      register_all_timed_actions();
-  }
-
-  void exit()
-  {
-    unregister_all_timed_actions();
-    for (const auto& action : on_exit_actions) 
-      {
-        if(action) action();
-      }
-  }
-
-  void unregister_all_timed_actions()
-  {
-    for(size_t i = 0; i < cyclic_actions.size(); i++)
-    {
-      TimedAction& timed_action = cyclic_actions[i];
-      if(timed_action.action == nullptr){continue;}
-      if(!timed_action.is_on){ continue;}
-
-      Scheduler::unregister_task(timed_action.id);
-      timed_action.is_on = false;
-    }
-  }
-
-  void register_all_timed_actions()
-  {
-    for(size_t i = 0; i < cyclic_actions.size(); i++)
-    {
-      TimedAction& timed_action = cyclic_actions[i];
-
-      if(timed_action.action == nullptr)
-      { 
-        continue;
-      }
-
-      timed_action.id = Scheduler::register_task(timed_action.period, timed_action.action);
-
-      if(timed_action.id == 255)
-      {
-        for(size_t j = 0; j < i; ++j)
-        {
-          TimedAction& prev_action = cyclic_actions[j];
-          if(prev_action.action == nullptr){ continue; }
-          if(!prev_action.is_on){ continue; }
-          Scheduler::unregister_task(prev_action.id);
-          prev_action.is_on = false;
+        for (size_t i = 0; i < cyclic_actions.size(); i++) {
+            TimedAction& slot = cyclic_actions[i];
+            if (&slot == timed_action) {
+                slot = TimedAction{};
+                return;
+            }
         }
-        ErrorHandler("Failed to register timed action");
-        return;
-      }
-      timed_action.is_on = true;
     }
-  }
 
-  void remove_cyclic_action(TimedAction *timed_action)
-  {
-    if(timed_action->is_on){ unregister_timed_action(timed_action);}
-
-    for(size_t i = 0; i < cyclic_actions.size(); i++)
-    {
-      TimedAction& slot = cyclic_actions[i];
-      if(&slot == timed_action)
-      {
-          slot = TimedAction{}; 
-          return;
-      }
+    void unregister_timed_action(TimedAction* timed_action) {
+        Scheduler::unregister_task(timed_action->id);
+        timed_action->is_on = false;
     }
-  }
 
-  void unregister_timed_action(TimedAction* timed_action)
-  {
-    Scheduler::unregister_task(timed_action->id);
-    timed_action->is_on = false;
-  }
+    template <ValidTime TimeUnit>
+    consteval TimedAction* add_cyclic_action(Callback action, TimeUnit period) {
+        TimedAction timed_action = {};
+        if constexpr (std::is_same_v<TimeUnit, std::chrono::milliseconds>) {
+            timed_action.alarm_precision = Milliseconds;
+            timed_action.period = period.count();
+        }
+        else {
+            ErrorHandler("Invalid Time Unit");
+        }
 
-  template <ValidTime TimeUnit>
-  consteval TimedAction * 
-  add_cyclic_action(Callback action,
-                                  TimeUnit period){
-    TimedAction timed_action = {};
-
-    if constexpr (std::is_same_v<TimeUnit, std::chrono::milliseconds>){
-        timed_action.period = period.count();
+        timed_action.action = action;
+        cyclic_actions.push_back(timed_action);
+        return &cyclic_actions[cyclic_actions.size() - 1];
     }
-    else 
-    {
-        ErrorHandler("Invalid Time Unit");
-    }
-    
-    timed_action.action = action;
-    cyclic_actions.push_back(timed_action);
-    return &cyclic_actions[cyclic_actions.size() - 1];
-  }
-
 };
 
-
-template <typename T, class StateEnum>
-struct is_state : std::false_type {};
+template <typename T, class StateEnum> struct is_state : std::false_type {};
 
 template <class StateEnum, size_t N>
-struct is_state<State<StateEnum, N>, StateEnum> : std::true_type {}; 
+struct is_state<State<StateEnum, N>, StateEnum> : std::true_type {};
 
 template <typename T, class StateEnum>
 concept IsState = is_state<T, StateEnum>::value;
@@ -224,275 +220,313 @@ concept IsState = is_state<T, StateEnum>::value;
 template <class StateEnum, typename... Ts>
 concept are_states = (IsState<Ts, StateEnum> && ...);
 
-/// Interface for State Machines to allow other classes to interact with the state machine without knowing its implementation
+template <class StateEnum, size_t NStates, size_t NTransitions, class... NestedMachines>
+class StateMachine;
+
+template <typename T> struct is_state_machine : std::false_type {};
+
+template <class StateEnum, size_t NStates, size_t NTransitions, class... NestedMachines>
+struct is_state_machine<StateMachine<StateEnum, NStates, NTransitions, NestedMachines...>>
+    : std::true_type {};
+
+template <typename T>
+concept IsStateMachineClass = is_state_machine<std::remove_cvref_t<T>>::value;
+
+/// Interface for State Machines to allow other classes to interact with the state machine without
+/// knowing its implementation
 class IStateMachine {
-    public:
+public:
     virtual constexpr ~IStateMachine() = default;
     virtual void check_transitions() = 0;
+    virtual void force_change_state(size_t state) = 0;
+    virtual size_t get_current_state_id() const = 0;
     constexpr bool operator==(const IStateMachine&) const = default;
-    protected:
+
+protected:
     virtual void enter() = 0;
     virtual void exit() = 0;
     virtual void start() = 0;
-    template <class E, size_t N, size_t T>
-    friend class StateMachine;
+    template <class E, size_t N, size_t T, class... NestedSMType> friend class StateMachine;
 };
 
-template <class StateEnum, size_t NStates, size_t NTransitions>
+template <class StateEnum, IsStateMachineClass NestedSMType> struct NestedMachineBinding {
+    StateEnum state;
+    NestedSMType* machine;
+
+    constexpr bool operator==(const NestedMachineBinding&) const = default;
+};
+
+template <typename T> struct is_nested_machine_binding : std::false_type {};
+
+template <class StateEnum, class NestedSMType>
+struct is_nested_machine_binding<NestedMachineBinding<StateEnum, NestedSMType>> : std::true_type {};
+
+template <typename T>
+concept IsNestedMachineBinding = is_nested_machine_binding<T>::value;
+template <typename T, typename StateEnum> struct is_nested_machine_binding_for : std::false_type {};
+
+template <typename StateEnum, class NestedSMType>
+struct is_nested_machine_binding_for<NestedMachineBinding<StateEnum, NestedSMType>, StateEnum>
+    : std::true_type {};
+
+template <typename T, typename StateEnum>
+concept IsNestedMachineBindingFor = is_nested_machine_binding_for<T, StateEnum>::value;
+
+namespace StateMachineHelper {
+
+template <class StateEnum, IsStateMachineClass NestedSMType, size_t N, size_t O>
+static consteval auto add_nesting(const State<StateEnum, N, O>& state, NestedSMType& machine) {
+    return NestedMachineBinding<StateEnum, NestedSMType>{state.get_state(), &machine};
+}
+
+template <typename... Bindings>
+    requires(IsNestedMachineBinding<Bindings> && ...)
+static consteval auto add_nested_machines(Bindings... bindings) {
+    constexpr std::size_t count = sizeof...(Bindings);
+    if constexpr (count > 1) {
+        auto states = std::array{bindings.state...};
+        for (std::size_t i = 0; i < count; ++i) {
+            for (std::size_t j = i + 1; j < count; ++j) {
+                if (states[i] == states[j]) {
+                    ErrorHandler("Duplicate state found in add_nested_machines");
+                }
+            }
+        }
+    }
+    return std::make_tuple(bindings...);
+}
+
+} // namespace StateMachineHelper
+
+template <class StateEnum, size_t NStates, size_t NTransitions, class... NestedMachines>
 class StateMachine : public IStateMachine {
-private:  
-  struct NestedPair 
-  {
-      StateEnum state;
-      IStateMachine* machine;
-      constexpr bool operator==(const NestedPair&) const = default;
-  };
+    static_assert((IsEnum<StateEnum>), "StateEnum must be an enum type");
+    static_assert(
+        (IsStateMachineClass<NestedMachines> && ...),
+        "All nested machines must be of type StateMachine"
+    );
 
-  StateEnum current_state;
+    template <class E, size_t N, size_t T, class... Nested> friend class StateMachine;
 
-public:
-  constexpr ~StateMachine() override = default;
+    StateEnum current_state;
+    std::tuple<NestedMachineBinding<StateEnum, NestedMachines>...> nested_machines;
+    StaticVector<State<StateEnum, NTransitions>, NStates> states;
+    StaticVector<Transition<StateEnum>, NTransitions> transitions = {};
+    std::array<std::pair<size_t, size_t>, NStates> transitions_assoc = {};
+    bool called_start = false;
 
+    void perform_state_change(StateEnum new_state) {
+        if (current_state == new_state) {
+            return;
+        }
 
-  private:
-  FixedVector<State<StateEnum, NTransitions>, NStates> states;
-  FixedVector<Transition<StateEnum>, NTransitions> transitions = {};
-  std::array<std::pair<size_t, size_t>, NStates> transitions_assoc ={};
-  FixedVector<NestedPair, NStates> nested_state_machine = {};
+        exit();
+        std::apply(
+            [this](auto&... nested) {
+                (void)((nested.state == this->current_state && nested.machine != nullptr
+                            ? (nested.machine->exit(), true)
+                            : false) ||
+                       ...);
+            },
+            nested_machines
+        );
 
-  constexpr bool operator==(const StateMachine&) const = default;
+        current_state = new_state;
+        enter();
+        std::apply(
+            [this](auto&... nested) {
+                (void)((nested.state == this->current_state && nested.machine != nullptr
+                            ? (nested.machine->enter(), true)
+                            : false) ||
+                       ...);
+            },
+            nested_machines
+        );
+    }
 
-  template <typename State>
-  consteval void process_state(const State& state, size_t offset) 
-  {
-        for (const auto& t : state.get_transitions()) 
-        {
+    constexpr bool operator==(const StateMachine&) const = default;
+
+    template <typename State> consteval void process_state(const State& state, size_t offset) {
+        for (const auto& t : state.get_transitions()) {
             transitions.push_back(t);
             offset++;
         }
 
         transitions_assoc[static_cast<size_t>(state.get_state())] = {
             offset - state.get_transitions().size(),
-            state.get_transitions().size()};
-  }
+            state.get_transitions().size()
+        };
+    }
 
-  inline void enter() override 
-  { 
-      auto& state = states[static_cast<size_t>(current_state)];
-      state.enter();
-      
-  }
+    inline void enter() override {
+        auto& state = states[static_cast<size_t>(current_state)];
+        state.enter();
+    }
 
-  inline void exit() override
-  {
-      auto& state = states[static_cast<size_t>(current_state)];
-      state.exit();
-  }
+    inline void exit() override {
+        auto& state = states[static_cast<size_t>(current_state)];
+        state.exit();
+    }
 
 public:
+    template <IsState<StateEnum>... S>
+    consteval StateMachine(
+        StateEnum initial_state,
+        const std::tuple<NestedMachineBinding<StateEnum, NestedMachines>...>& nested_machines_tuple,
+        S... states_input
+    )
+        : current_state(initial_state), nested_machines(nested_machines_tuple) {
 
-  template <IsState<StateEnum>... S>
-    consteval StateMachine(StateEnum initial_state, S... states) 
-    : current_state(initial_state)
-     {        
-        //Sort states by their enum value
         using StateType = State<StateEnum, NTransitions>;
         std::array<StateType, sizeof...(S)> sorted_states;
         size_t index = 0;
-        ((sorted_states[index++] = StateType(states)), ...);
-    
-        for(size_t i = 0; i < sorted_states.size(); i++){
-            for(size_t j = 0; j < sorted_states.size() - 1; j++){
-                if(sorted_states[j].get_state() > sorted_states[j+1].get_state()){
+        ((sorted_states[index++] = StateType(states_input)), ...);
+
+        for (size_t i = 0; i < sorted_states.size(); i++) {
+            for (size_t j = 0; j < sorted_states.size() - 1; j++) {
+                if (sorted_states[j].get_state() > sorted_states[j + 1].get_state()) {
                     auto temp = sorted_states[j];
-                    sorted_states[j] = sorted_states[j+1];
-                    sorted_states[j+1] = temp;
+                    sorted_states[j] = sorted_states[j + 1];
+                    sorted_states[j + 1] = temp;
                 }
             }
         }
-        
-        //Check that states are contiguous and start from 0
-        for(size_t i = 0; i < sorted_states.size(); i++) {
-            if(static_cast<size_t>(sorted_states[i].get_state()) != i){
+
+        // Check for duplicate states
+        for (size_t i = 0; i < sorted_states.size() - 1; i++) {
+            for (size_t j = i + 1; j < sorted_states.size(); j++) {
+                if (sorted_states[i].get_state() == sorted_states[j].get_state()) {
+                    ErrorHandler("Duplicate state found in StateMachine constructor");
+                }
+            }
+        }
+
+        // Check that states are contiguous and start from 0
+        for (size_t i = 0; i < sorted_states.size(); i++) {
+            if (static_cast<size_t>(sorted_states[i].get_state()) != i) {
                 ErrorHandler("States Enum must be contiguous and start from 0");
             }
         }
 
-        for(size_t i = 0; i < sorted_states.size(); i++) {
+        for (size_t i = 0; i < sorted_states.size(); i++) {
             this->states.push_back(sorted_states[i]);
         }
 
         size_t offset = 0;
-        for(const auto& s : sorted_states) {
-             process_state(s, offset);
-             offset += s.get_transitions().size();
+        for (const auto& s : sorted_states) {
+            process_state(s, offset);
+            offset += s.get_transitions().size();
         }
     }
+    constexpr ~StateMachine() override = default;
 
-    
-
-    void check_transitions() override 
-    {
+    void check_transitions() override {
+        if (!called_start) [[unlikely]] {
+            ErrorHandler("Error: check_transitions called before StateMachine.start()");
+            return;
+        }
         auto& [i, n] = transitions_assoc[static_cast<size_t>(current_state)];
-        for (auto index = i; index < i + n; ++index) 
-        {
+
+        for (auto index = i; index < i + n; ++index) {
             const auto& t = transitions[index];
-            if (t.predicate()) 
-            {
-                exit();
-                for(auto& nested : nested_state_machine)
-                {
-                  if(nested.state == current_state){
-                    nested.machine->exit();
-                    break;
-                  }
-                }
-                current_state = t.target;
-                enter();
-                for(auto& nested : nested_state_machine)
-                {
-                  if(nested.state == current_state){
-                    nested.machine->enter();
-                    break;
-                  }
-                }
+            if (t.predicate()) {
+                perform_state_change(t.target);
                 break;
             }
         }
 
-        for(auto& nested : nested_state_machine)
-        {
-          if(nested.state == current_state){
-            nested.machine->check_transitions();
-            break;
-          }
-        }
+        std::apply(
+            [this](auto&... nested) {
+                (void)((nested.state == this->current_state && nested.machine != nullptr
+                            ? (nested.machine->check_transitions(), true)
+                            : false) ||
+                       ...);
+            },
+            nested_machines
+        );
     }
 
-    void start() override
-    {
-      enter();
-      for(auto& nested : nested_state_machine)
-        {
-          if(nested.state == current_state){
-            nested.machine->start();
-            break;
-          }
-        }
+    void start() override {
+        called_start = true;
+        enter();
+        std::apply(
+            [this](auto&... nested) {
+                (void)((nested.state == this->current_state && nested.machine != nullptr
+                            ? (nested.machine->start(), true)
+                            : false) ||
+                       ...);
+            },
+            nested_machines
+        );
+        std::apply(
+            [this](auto&... nested) {
+                (void)((nested.machine != nullptr ? (nested.machine->called_start = true, true)
+                                                  : false) ||
+                       ...);
+            },
+            nested_machines
+        );
     }
 
+    void force_change_state(size_t state) override {
+        perform_state_change(static_cast<StateEnum>(state));
+    }
+
+    size_t get_current_state_id() const override { return static_cast<size_t>(current_state); }
+
+    template <size_t N, size_t O> void force_change_state(const State<StateEnum, N, O>& state) {
+        perform_state_change(state.get_state());
+    }
+
+    template <ValidTime TimeUnit, size_t N, size_t O>
+    consteval TimedAction*
+    add_cyclic_action(Callback action, TimeUnit period, const State<StateEnum, N, O>& state) {
+        for (size_t i = 0; i < states.size(); ++i) {
+            if (states[i].get_state() == state.get_state()) {
+                return states[i].add_cyclic_action(action, period);
+            }
+        }
+        ErrorHandler("Error: The state is not added to the state machine");
+        return nullptr;
+    }
 
     template <size_t N, size_t O>
-    void force_change_state(const State<StateEnum, N, O>& state)
-    {
-      StateEnum new_state = state.get_state();
-      if(current_state == new_state)
-      {
-       return;
-      }
-        exit();
-        for(auto& nested : nested_state_machine)
-        {
-          if(nested.state == current_state){
-            nested.machine->exit();
-            break;
-          }
+    void remove_cyclic_action(TimedAction* timed_action, const State<StateEnum, N, O>& state) {
+        for (size_t i = 0; i < states.size(); ++i) {
+            if (states[i].get_state() == state.get_state()) {
+                states[i].remove_cyclic_action(timed_action);
+                return;
+            }
         }
-        current_state = new_state;
-        enter();
-        for(auto& nested : nested_state_machine)
-        {
-          if(nested.state == current_state){
-            nested.machine->enter();
-            break;
-          }
-        }
+        ErrorHandler("Error: The state is not added to the state machine");
     }
-  
 
-
-  template <ValidTime TimeUnit, size_t N, size_t O>
-  consteval TimedAction * 
-  add_cyclic_action(Callback action,
-                                  TimeUnit period,const State<StateEnum, N, O>& state)
-  {
-    for(size_t i = 0; i < states.size(); ++i)
-    {
-        if(states[i].get_state() == state.get_state())
-        {
-            return states[i].add_cyclic_action(action, period);
+    template <size_t N, size_t O>
+    consteval void add_enter_action(Callback action, const State<StateEnum, N, O>& state) {
+        for (size_t i = 0; i < states.size(); ++i) {
+            if (states[i].get_state() == state.get_state()) {
+                states[i].add_enter_action(action);
+                return;
+            }
         }
+        ErrorHandler("Error: The state is not added to the state machine");
     }
-    ErrorHandler("Error: The state is not added to the state machine");
-    return nullptr;
-  }
 
-  template <size_t N, size_t O>
-  void remove_cyclic_action(TimedAction *timed_action, const State<StateEnum, N, O>& state)
-  {
-    for(size_t i = 0; i < states.size(); ++i)
-    {
-        if(states[i].get_state() == state.get_state())
-        {
-           states[i].remove_cyclic_action(timed_action);
-           return;
-          }
-    }
-    ErrorHandler("Error: The state is not added to the state machine");
-  }
-
-  template <size_t N, size_t O>
-  consteval void add_enter_action(Callback action, const State<StateEnum, N, O>& state)
-  {
-    for(size_t i = 0; i < states.size(); ++i)
-    {
-        if(states[i].get_state() == state.get_state())
-        {
-            states[i].add_enter_action(action);
-            return;
+    template <size_t N, size_t O>
+    consteval void add_exit_action(Callback action, const State<StateEnum, N, O>& state) {
+        for (size_t i = 0; i < states.size(); ++i) {
+            if (states[i].get_state() == state.get_state()) {
+                states[i].add_exit_action(action);
+                return;
+            }
         }
+        ErrorHandler("Error: The state is not added to the state machine");
     }
-    ErrorHandler("Error: The state is not added to the state machine");
-  }
 
-  template <size_t N, size_t O>
-  consteval void add_exit_action(Callback action, const State<StateEnum, N, O>& state)
-  {
-    for(size_t i = 0; i < states.size(); ++i)
-    {
-        if(states[i].get_state() == state.get_state())
-        {
-            states[i].add_exit_action(action);
-            return;
-        }
-    }
-    ErrorHandler("Error: The state is not added to the state machine");
-  }
+    StateEnum get_current_state() const { return current_state; }
 
-  template <size_t N, size_t O>
-  constexpr void add_state_machine(IStateMachine& state_machine, const State<StateEnum, N, O>& state)
-  {
-      for(auto& nested : nested_state_machine)
-      {
-        if(nested.state == state.get_state())
-        {
-          ErrorHandler("Only one Nested State Machine can be added per state");
-          return;
-        }
-      }
-      nested_state_machine.push_back({state.get_state(), &state_machine});
-  }
 
-  StateEnum get_current_state() const
-  {
-      return current_state;
-  }
-
-  constexpr auto& get_states()
-  {
-    return states;
-  }
-
+    constexpr auto& get_states() { return states; }
 };
 
 /* @brief Helper function to create a State instance
@@ -502,30 +536,67 @@ public:
  * @param state The state enum value
  * @param transitions The transitions associated with the state
  * @return A State instance initialized with the provided state and transitions
-*
-*/
+ *
+ */
 
 template <typename StateEnum, typename... Transitions>
-  requires are_transitions<StateEnum, Transitions...>
-  consteval auto make_state(StateEnum state, Transitions... transitions) {
+    requires are_transitions<StateEnum, Transitions...>
+consteval auto make_state(StateEnum state, Transitions... transitions) {
     constexpr size_t number_of_transitions = sizeof...(transitions);
-    return State<StateEnum, number_of_transitions>(state,transitions...);
-  }
+    return State<StateEnum, number_of_transitions>(state, transitions...);
+}
 
-  /* @brief Helper function to create a StateMachine instance
-  *
-  * @tparam States Variadic template parameter pack representing the states
-  * @param initial_state The initial state enum value
-  * @param states The states to be included in the state machine
-  * @return A StateMachine instance initialized with the provided initial state and states
-  */
+/* @brief Helper function to create a StateMachine instance
+ *
+ * @tparam States Variadic template parameter pack representing the states
+ * @param initial_state The initial state enum value
+ * @param states The states to be included in the state machine
+ * @return A StateMachine instance initialized with the provided initial state and states
+ */
 
-  template <typename StateEnum, typename... States>
+template <typename StateEnum, typename... States>
     requires are_states<StateEnum, States...>
-  consteval auto make_state_machine(StateEnum initial_state, States... states) {
+consteval auto make_state_machine(StateEnum initial_state, States... states) {
     constexpr size_t number_of_states = sizeof...(states);
-    constexpr size_t number_of_transitions = (std::remove_reference_t<States>::transition_count + ... + 0);
+    constexpr size_t number_of_transitions =
+        (std::remove_reference_t<States>::transition_count + ... + 0);
 
-    return StateMachine<StateEnum, number_of_states, number_of_transitions>(initial_state, states...);
-  }
+    return StateMachine<StateEnum, number_of_states, number_of_transitions>(
+        initial_state,
+        std::tuple<>{},
+        states...
+    );
+}
+/* @brief Helper function to create a StateMachine instance
+ *
+ * @tparam States Variadic template parameter pack representing the states
+ * @param initial_state The initial state enum value
+ * @param nested_machines Tuple of NestedMachineBinding representing the nested state machines to
+ * its corresponding state
+ * @param states The states to be included in the state machine
+ * @return A StateMachine instance initialized with the provided initial state and states, as well
+ * as the nested state machines
+ */
 
+template <IsEnum StateEnum, typename... NestedMachines, typename... States>
+    requires are_states<StateEnum, States...> &&
+             (IsNestedMachineBindingFor<NestedMachines, StateEnum> && ...)
+consteval auto make_state_machine(
+    StateEnum initial_state,
+    std::tuple<NestedMachines...> nested_machines,
+    States... states
+) {
+    constexpr size_t number_of_states = sizeof...(states);
+    constexpr size_t number_of_transitions =
+        (std::remove_reference_t<States>::transition_count + ... + 0);
+
+    return StateMachine<
+        StateEnum,
+        number_of_states,
+        number_of_transitions,
+        typename std::remove_pointer<decltype(std::declval<NestedMachines>().machine)>::type...>(
+        initial_state,
+        nested_machines,
+        states...
+    );
+}

@@ -24,9 +24,10 @@ void loop() {
 
 void ErrorHandler(String s)
 {
-  Serial.print(s);
   while(1){
-      Serial.print("Error handler called...");
+      Serial.println("Error handler called...");
+      Serial.print("Error is:");
+      Serial.println(s);
       delay(500);
   };
 }

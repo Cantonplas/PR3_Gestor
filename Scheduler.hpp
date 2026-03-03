@@ -25,6 +25,7 @@ private:
     }
 
 public:
+    inline static constexpr uint32_t INVALID_ID = 255;
     static uint32_t get_global_time()
     {
         return sys_ticks;
@@ -36,10 +37,10 @@ public:
         timerAlarm(timer, 1000, true, 0);  //1000us de prescaler da 1ms por cada tick :p
     }
 
-    static int register_task(uint32_t period_ms,TaskCallback cb) {
-        if (active_tasks == 0xFFFFFFFF) return -1; 
+    static uint32_t register_task(uint32_t period_ms,TaskCallback cb) {
+        if (active_tasks == 0xFFFFFFFF) return INVALID_ID; 
         portENTER_CRITICAL(&timerMux); 
-        int id = __builtin_ctz(~active_tasks); 
+        uint32_t id = __builtin_ctz(~active_tasks); 
 
         active_tasks |= (1 << id);   
         oneshot_tasks &= ~(1 << id); 
@@ -51,11 +52,11 @@ public:
         return id;
     }
 
-    static int set_timeout(uint32_t delay_ms,TaskCallback cb) {
-        if (active_tasks == 0xFFFFFFFF) return -1;
+    static uint32_t set_timeout(uint32_t delay_ms,TaskCallback cb) {
+        if (active_tasks == 0xFFFFFFFF) return INVALID_ID;
 
         portENTER_CRITICAL(&timerMux); 
-        int id = __builtin_ctz(~active_tasks); 
+        uint32_t id = __builtin_ctz(~active_tasks); 
 
         active_tasks |= (1 << id);
         oneshot_tasks |= (1 << id); 
