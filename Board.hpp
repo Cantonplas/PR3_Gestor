@@ -10,6 +10,7 @@
 class Board
 {
   inline static bool busy_junction_flag{false};
+
   static void control_loop()
   {
     if(busy_junction_flag == true)
@@ -82,8 +83,7 @@ class Board
 
     sm.add_enter_action([](){
       Actuators::set_led_blue(true);
-      Sensors::distancia_ultra1 = 0.0f;
-      Sensors::distancia_ultra2 = 0.0f;
+      Serial.println("Ready_state");
     },junction_ready_state);
     
 
@@ -94,25 +94,9 @@ class Board
     // },junction_busy_state);
 
     sm.add_cyclic_action([](){
-      Sensors::read_ultrasonido();
+      Serial.println("Ready_state");
     },50ms,junction_busy_state);
 
-    sm.add_cyclic_action([](){
-    if((Sensors::distancia_ultra1 > 1.0f && Sensors::distancia_ultra1 < 20.0f) || 
-    (Sensors::distancia_ultra2 > 1.0f && Sensors::distancia_ultra2 < 20.0f))
-    {
-      if(Comms::get_state(Comms::Robot_id::Robot1) == Comms::Request_type ::Accepted)
-      {
-        Comms::set_done(Comms::Robot_id::Robot1);
-        busy_junction_flag = false;
-      }
-      if(Comms::get_state(Comms::Robot_id::Robot2) == Comms::Request_type ::Accepted)
-      {
-        Comms::set_done(Comms::Robot_id::Robot2);
-        busy_junction_flag = false;
-      }
-    }
-    },20ms,junction_busy_state);
 
     sm.add_cyclic_action([](){
       static bool toggle = true;
@@ -125,7 +109,7 @@ class Board
       auto best_times = Comms::get_best_times();
       for(auto tiempos : last_times)
       {
-        Serial.print("Last times recieved:");
+        Serial.print("Last times recieved:"); //Igual habria que indicar el robot xd
         Serial.println(tiempos);
       }
 

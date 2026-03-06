@@ -64,6 +64,7 @@ class Comms
       }
 
       Robot_id robot = static_cast<Robot_id>(dic["id_device"].as<uint8_t>());
+      Serial.println("Cruce solicitado");
       portENTER_CRITICAL(&timerMux);
       set_requested(robot);
       portEXIT_CRITICAL(&timerMux);
@@ -80,6 +81,7 @@ class Comms
       }
 
       Robot_id robot = static_cast<Robot_id>(dic["id_device"].as<uint8_t>());
+      set_done(robot);
       uint32_t time_in_ms = dic["time"];
       portENTER_CRITICAL(&timerMux);
       compare_time(robot,time_in_ms);
@@ -106,35 +108,51 @@ class Comms
     return robot_requests[static_cast<size_t>(robot)];
   }
 
-  static void set_done(Robot_id robot)
-  {
-      robot_requests[static_cast<size_t>(robot)] = Request_type::None;
-      send_finish_robot(robot);
-
-  }
-
   static void set_accepted(Robot_id robot)
   {
+      portENTER_CRITICAL(&timerMux);
       robot_requests[static_cast<size_t>(robot)] = Request_type::Accepted;
+      portEXIT_CRITICAL(&timerMux);
+
       send_auth_robot(robot);
 
   }
 
   static std::span<const uint32_t> get_best_times()
   {
+    portENTER_CRITICAL(&timerMux);
     return best_robot_time;
+    portEXIT_CRITICAL(&timerMux);
+
   }
 
   static std::span<const uint32_t> get_last_times()
   {
+    portENTER_CRITICAL(&timerMux);
     return last_robot_time;
+    portEXIT_CRITICAL(&timerMux);
   }
 
 private:
 
   static void set_requested(Robot_id robot)
   {
+    portENTER_CRITICAL(&timerMux);
     robot_requests[static_cast<size_t>(robot)] = Request_type::Requested;
+    portEXIT_CRITICAL(&timerMux);
+
+  }
+
+  
+  static void set_done(Robot_id robot)
+  {
+      portENTER_CRITICAL(&timerMux);
+      robot_requests[static_cast<size_t>(robot)] = Request_type::None;
+      portEXIT_CRITICAL(&timerMux);
+
+      send_finish_robot(robot);
+
+
   }
 
   static void compare_time(Robot_id robot, const uint32_t time)

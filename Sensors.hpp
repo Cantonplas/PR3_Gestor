@@ -22,6 +22,7 @@ class Sensors
     else {
         duracionPulso1 = micros() - inicioPulso1;
         distancia_ultra1 = duracionPulso1 * 0.034 / 2.0;
+        Serial.println(distancia_ultra1);
     }
     }
 
