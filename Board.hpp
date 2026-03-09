@@ -10,10 +10,19 @@
 class Board
 {
   inline static bool busy_junction_flag{false};
+  inline static portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;
 
   static void control_loop()
   {
-    if(busy_junction_flag == true)
+    if((Comms::get_state(Comms::Robot_id::Robot1) == Comms::Request_type ::None) &&  
+          (Comms::get_state(Comms::Robot_id::Robot2)== Comms::Request_type ::Requested) 
+          || (Comms::get_state(Comms::Robot_id::Robot1) == Comms::Request_type ::Requested) &&  
+          (Comms::get_state(Comms::Robot_id::Robot2)== Comms::Request_type ::None) )
+          {
+            set_junction_busy(false);
+          }
+
+    if(get_junction_busy() == true)
     {
       return;
     }
@@ -25,11 +34,11 @@ class Board
         if(priority_robot1)
         {
           Comms::set_accepted(Comms::Robot_id::Robot1);
-          busy_junction_flag = true;
+          set_junction_busy(true);
         }
         else{
           Comms::set_accepted(Comms::Robot_id::Robot2);
-          busy_junction_flag= true;
+          set_junction_busy(true);
         }
         priority_robot1 = !priority_robot1;
         return;
@@ -38,14 +47,14 @@ class Board
     if(Comms::get_state(Comms::Robot_id::Robot1) == Comms::Request_type ::Requested)
       {
         Comms::set_accepted(Comms::Robot_id::Robot1);
-        busy_junction_flag = true;
+        set_junction_busy(true);
         return;
       }
 
       if(Comms::get_state(Comms::Robot_id::Robot2) == Comms::Request_type ::Requested)
       {
         Comms::set_accepted(Comms::Robot_id::Robot2);
-        busy_junction_flag = true;
+        set_junction_busy(true);
         return;
       }
   }
@@ -92,10 +101,6 @@ class Board
     // sm.add_enter_action([](){
     //   Actuators::levantar_barrera?
     // },junction_busy_state);
-
-    sm.add_cyclic_action([](){
-      Serial.println("Ready_state");
-    },50ms,junction_busy_state);
 
 
     sm.add_cyclic_action([](){
@@ -150,6 +155,22 @@ class Board
   }();
 
   public: 
+
+  static void set_junction_busy(bool state)
+  {
+    portENTER_CRITICAL(&timerMux);
+      busy_junction_flag = state;
+    portEXIT_CRITICAL(&timerMux);
+  }
+
+  static bool get_junction_busy()
+  {
+    portENTER_CRITICAL(&timerMux);  
+    bool aux = busy_junction_flag;    
+    portEXIT_CRITICAL(&timerMux);
+    return aux;
+  }
+
   static void start()
   {
     State_machine.start();
