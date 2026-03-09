@@ -1,4 +1,5 @@
 #pragma once
+#include <span>
 #include <Arduino.h>
 #include "StateMachine.hpp"
 #include "Data.hpp"
@@ -11,6 +12,23 @@ class Board
 {
   inline static bool busy_junction_flag{false};
   inline static portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;
+
+  public:
+  static void set_junction_busy(bool state)
+  {
+    portENTER_CRITICAL(&timerMux);
+      busy_junction_flag = state;
+    portEXIT_CRITICAL(&timerMux);
+  }
+
+  static bool get_junction_busy()
+  {
+    portENTER_CRITICAL(&timerMux);  
+    bool aux = busy_junction_flag;    
+    portEXIT_CRITICAL(&timerMux);
+    return aux;
+  }
+  private:
 
   static void control_loop()
   {
@@ -123,6 +141,7 @@ class Board
         Serial.print("Best times recieved:");
         Serial.println(tiempos);
       }
+      set_junction_busy(false);
 
     },junction_busy_state);
 
@@ -155,21 +174,6 @@ class Board
   }();
 
   public: 
-
-  static void set_junction_busy(bool state)
-  {
-    portENTER_CRITICAL(&timerMux);
-      busy_junction_flag = state;
-    portEXIT_CRITICAL(&timerMux);
-  }
-
-  static bool get_junction_busy()
-  {
-    portENTER_CRITICAL(&timerMux);  
-    bool aux = busy_junction_flag;    
-    portEXIT_CRITICAL(&timerMux);
-    return aux;
-  }
 
   static void start()
   {

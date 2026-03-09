@@ -118,19 +118,21 @@ class Comms
 
   }
 
-  static std::span<const uint32_t> get_best_times()
+  static std::array<uint32_t,2> get_best_times()
   {
     portENTER_CRITICAL(&timerMux);
-    return best_robot_time;
+    auto aux= best_robot_time;
     portEXIT_CRITICAL(&timerMux);
+    return aux;
 
   }
 
-  static std::span<const uint32_t> get_last_times()
+  static std::array<uint32_t,2> get_last_times()
   {
     portENTER_CRITICAL(&timerMux);
-    return last_robot_time;
+    auto aux =  last_robot_time;
     portEXIT_CRITICAL(&timerMux);
+    return aux;
   }
 
 private:
