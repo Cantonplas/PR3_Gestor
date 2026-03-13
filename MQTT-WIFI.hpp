@@ -31,8 +31,8 @@ class Comms
   private: 
 
   inline static std::array<Request_type,2> robot_requests{Request_type::None,Request_type::None};
-  inline static std::array<uint32_t,2> best_robot_time{0,0};
-  inline static std::array<uint32_t,2> last_robot_time{0,0};
+  inline static std::array<uint32_t,2> best_robot_time{999,999};
+  inline static std::array<uint32_t,2> last_robot_time{999,999};
 
   inline static PicoMQTT::Server mqtt;
   inline static portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;
@@ -148,13 +148,14 @@ private:
   
   static void set_done(Robot_id robot);
 
-  static void compare_time(Robot_id robot, const uint32_t time)
+  static void compare_time(Robot_id robot, uint32_t time)
   {
     if(time < best_robot_time[static_cast<size_t>(robot)])
     {
       best_robot_time[static_cast<size_t>(robot)] = time;
-      return;
     }
+    last_robot_time[static_cast<size_t>(robot)] = time;
+    return;
   }
 
   static void send_auth_robot(Robot_id robot)
